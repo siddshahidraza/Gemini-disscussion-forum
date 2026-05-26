@@ -109,32 +109,32 @@ export default function AICoach({
   };
 
   return (
-    <div className="bg-violet-50/70 border border-violet-100 rounded-xl p-5 shadow-sm" id="ai-coach-pane">
-      <div className="flex items-center gap-2 mb-3" id="ai-coach-header">
-        <div className="p-1.5 bg-violet-600 text-white rounded-lg" id="ai-coach-icon">
+    <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-5.5 shadow-xs animate-fade-in" id="ai-coach-pane">
+      <div className="flex items-center gap-2 mb-4.5" id="ai-coach-header">
+        <div className="p-2 bg-indigo-650 bg-indigo-600 text-white rounded-xl" id="ai-coach-icon">
           <Sparkles className="w-4 h-4" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-violet-950 flex items-center gap-1.5" id="ai-coach-title">
+          <h3 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 uppercase font-sans tracking-wide" id="ai-coach-title">
             AI Rubric Alignment Coach
-            <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 bg-violet-200 text-violet-800 rounded-full">Pre-Draft Help</span>
+            <span className="text-[9px] font-mono font-extrabold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full shrink-0">Pre-Draft Help</span>
           </h3>
-          <p className="text-[11px] text-gray-500" id="ai-coach-desc">Get constructive alignment advice before submitting.</p>
+          <p className="text-[11px] text-slate-500 font-sans font-medium" id="ai-coach-desc">Get constructive alignment advice before submitting.</p>
         </div>
       </div>
 
-      <div className="space-y-3" id="ai-coach-body">
+      <div className="space-y-3.5" id="ai-coach-body">
         {error && (
-          <div className="p-3 bg-amber-50 border border-amber-100 text-amber-800 text-xs rounded-lg flex gap-2 items-center" id="ai-coach-error">
+          <div className="p-3 bg-amber-50 border border-amber-100 text-amber-805 text-xs rounded-xl flex gap-2 items-center font-sans font-medium" id="ai-coach-error">
             <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
             <p>{error}</p>
           </div>
         )}
 
         {draftContent.length < 30 ? (
-          <div className="text-center py-6 text-gray-400 text-xs border border-dashed border-gray-200 rounded-lg bg-white/50" id="ai-coach-empty mb-2">
-            <p className="font-medium text-gray-500 mb-1">Your draft is very short</p>
-            <p className="text-[10px] text-gray-400 px-4">Write at least 30 characters in your text editor on the left to receive customized coaching suggestions.</p>
+          <div className="text-center py-7 text-slate-400 text-xs border border-dashed border-slate-205 border-slate-200 rounded-2xl bg-white/60 shadow-xs" id="ai-coach-empty mb-2">
+            <p className="font-bold text-slate-700 mb-1 font-sans">Your draft is too short</p>
+            <p className="text-[10px] text-slate-450 px-4 font-sans font-medium leading-relaxed">Write at least 30 characters in your text editor on the left to receive customized coaching suggestions.</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2" id="ai-coach-trigger">
@@ -142,7 +142,7 @@ export default function AICoach({
               <button
                 id="btn-coach-trigger"
                 onClick={handleGetCoachTips}
-                className="w-full text-xs font-medium py-2.5 px-4 bg-violet-800 hover:bg-violet-900 text-white rounded-lg flex items-center justify-center gap-2 transition"
+                className="w-full text-xs font-bold py-2.5 px-4 bg-indigo-650 bg-indigo-600 hover:bg-indigo-750 hover:bg-indigo-700 text-white rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 Analyze Draft Against Rubrics
@@ -152,32 +152,32 @@ export default function AICoach({
         )}
 
         {loading && (
-          <div className="py-8 flex flex-col items-center justify-center text-center text-xs text-gray-500 bg-white border border-violet-100 rounded-xl" id="ai-coach-loading">
-            <Loader2 className="w-6 h-6 text-violet-700 animate-spin mb-2" />
-            <span className="font-semibold text-violet-950">AI Coach is reading your draft...</span>
-            <span className="text-[10px] text-gray-400 mt-1">Checking arguments against rubric metrics</span>
+          <div className="py-8.5 flex flex-col items-center justify-center text-center text-xs text-slate-500 bg-white border border-indigo-100 rounded-2xl shadow-xs" id="ai-coach-loading">
+            <Loader2 className="w-6 h-6 text-indigo-600 animate-spin mb-2.5" />
+            <span className="font-bold text-indigo-950 font-sans">AI Coach is reading your draft...</span>
+            <span className="text-[10px] text-slate-400 mt-1 font-sans font-medium">Checking arguments against rubric metrics</span>
           </div>
         )}
 
         {coaching && !loading && (
-          <div className="bg-white border border-violet-100/80 rounded-xl p-4 shadow-inner" id="ai-coach-result">
-            <div className="flex items-center justify-between pb-2 mb-3 border-b border-gray-100" id="ai-coach-result-header">
-              <span className="text-[11px] font-semibold text-violet-900 uppercase tracking-wider flex items-center gap-1">
+          <div className="bg-white border border-indigo-100 rounded-2xl p-4.5 shadow-inner" id="ai-coach-result">
+            <div className="flex items-center justify-between pb-2 mb-3.5 border-b border-slate-100" id="ai-coach-result-header">
+              <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-widest flex items-center gap-1 font-sans">
                 <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
                 Coach Suggestions
               </span>
               <button
                 id="btn-re-coach"
                 onClick={handleGetCoachTips}
-                className="text-[10px] text-violet-700 hover:text-violet-900 font-medium hover:underline"
+                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
               >
                 Re-Analyze Draft
               </button>
             </div>
-            <div className="space-y-1 overflow-y-auto max-h-[290px] pr-1" id="ai-coach-tips-holder">
+            <div className="space-y-1 overflow-y-auto max-h-[290px] pr-1 font-sans" id="ai-coach-tips-holder">
               {renderFormattedTips(coaching)}
             </div>
-            <div className="text-[10px] text-gray-400 italic text-center mt-3 pt-2 border-t border-gray-100" id="ai-coach-disclaimer">
+            <div className="text-[10px] text-slate-400 italic text-center mt-3.5 pt-2.5 border-t border-slate-100 font-sans font-medium" id="ai-coach-disclaimer">
               Feedback is advisory. Use it to polish and extend your claims before final upload!
             </div>
           </div>

@@ -28,14 +28,18 @@ import {
   TrendingUp
 } from "lucide-react";
 
+import { Classroom } from "../types";
+
 interface StudentDashboardProps {
   currentStudent: UserProfile;
   assignments: Assignment[];
   submissions: Submission[];
   peerReviews: PeerReview[];
-  onSubmitSubmission: (assignmentId: string, content: string, aiFeedback: AIFeedback | null) => void;
-  onSaveDraft: (assignmentId: string, content: string) => void;
+  classrooms: Classroom[];
+  onSubmitSubmission: (assignmentId: string, content: string, aiFeedback: AIFeedback | null, extraFields?: any) => void;
+  onSaveDraft: (assignmentId: string, content: string, extraFields?: any) => void;
   onSubmitPeerReview: (newReview: PeerReview) => void;
+  onJoinClassroom: (classCode: string) => boolean;
 }
 
 export default function StudentDashboard({
@@ -43,12 +47,25 @@ export default function StudentDashboard({
   assignments,
   submissions,
   peerReviews,
+  classrooms,
   onSubmitSubmission,
   onSaveDraft,
-  onSubmitPeerReview
+  onSubmitPeerReview,
+  onJoinClassroom
 }: StudentDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'discussion' | 'peer-review'>('discussion');
-  const [selectedAsgId, setSelectedAsgId] = useState<string>(assignments[0]?.id || "");
+  const [activeTab, setActiveTab] = useState<'discussion' | 'peer-review' | 'joined-classrooms'>('discussion');
+  const [selectedAsgId, setSelectedAsgId] = useState<string>("");
+  
+  // Join classroom form states
+  const [joinClassCode, setJoinClassCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
+
+  // Research paper asset inputs
+  const [journalPaperTitle, setJournalPaperTitle] = useState("");
+  const [paperGist, setPaperGist] = useState("");
+  const [pptFileName, setPptFileName] = useState("");
+  const [videoFileName, setVideoFileName] = useState("");
   
   // Submission Editor State
   const [editorText, setEditorText] = useState("");
@@ -60,25 +77,54 @@ export default function StudentDashboard({
 
   // Peer review selection state
   const [selectedPeerSubId, setSelectedPeerSubId] = useState<string | null>(null);
+  const [isModerating, setIsModerating] = useState(false);
+  const [moderationWarning, setModerationWarning] = useState<{
+    flagReason: string;
+    suggestedRevision: string;
+    scoreGiven: number;
+    strengths: string;
+    improvements: string;
+  } | null>(null);
+
   // Peer review form states
   const [peerScores, setPeerScores] = useState<{ [categoryId: string]: number }>({});
   const [peerGoodComments, setPeerGoodComments] = useState("");
   const [peerImproveComments, setPeerImproveComments] = useState("");
   const [peerSuccessMsg, setPeerSuccessMsg] = useState(false);
 
-  // Load draft or submission content when selected assignment or student changes
-  const activeAssignment = assignments.find(a => a.id === selectedAsgId) || assignments[0];
-  const mySubmission = submissions.find(s => s.assignmentId === selectedAsgId && s.studentId === currentStudent.id);
+  // Filter assignments matching the student's joined classroom codes OR has no classroomCode
+  const myClassroomCodes = (currentStudent.classroomCodes || []).map(c => c.toUpperCase());
+  const filteredAssignments = assignments.filter(asg => {
+    if (!asg.classroomCode) return true; // public
+    return myClassroomCodes.includes(asg.classroomCode.toUpperCase());
+  });
+
+  const activeAssignment = filteredAssignments.find(a => a.id === selectedAsgId) || filteredAssignments[0];
+  const mySubmission = submissions.find(s => s.assignmentId === (activeAssignment?.id || "") && s.studentId === currentStudent.id);
+
+  useEffect(() => {
+    if (activeAssignment?.id && !selectedAsgId) {
+      setSelectedAsgId(activeAssignment.id);
+    }
+  }, [activeAssignment, selectedAsgId]);
 
   useEffect(() => {
     if (mySubmission) {
       setEditorText(mySubmission.content);
+      setJournalPaperTitle(mySubmission.journalPaperTitle || "");
+      setPaperGist(mySubmission.paperGist || "");
+      setPptFileName(mySubmission.pptFileName || "");
+      setVideoFileName(mySubmission.videoFileName || "");
       // Auto toggle tab matching submission state
       if (mySubmission.status === 'submitted') {
         setSubmittedSubTab('ai-feedback');
       }
     } else {
       setEditorText("");
+      setJournalPaperTitle("");
+      setPaperGist("");
+      setPptFileName("");
+      setVideoFileName("");
     }
   }, [selectedAsgId, currentStudent.id, mySubmission]);
 
@@ -96,11 +142,36 @@ export default function StudentDashboard({
   };
 
   const handleSaveDraftLocal = () => {
-    onSaveDraft(selectedAsgId, editorText);
+    const extra = {
+      journalPaperTitle: journalPaperTitle.trim() || undefined,
+      paperGist: paperGist.trim() || undefined,
+      pptFileName: pptFileName.trim() || undefined,
+      videoFileName: videoFileName.trim() || undefined
+    };
+    onSaveDraft(selectedAsgId, editorText, extra);
     alert("Draft saved to browser storage successfully!");
   };
 
   const handleSubmitFinalEssay = async () => {
+    if (activeAssignment?.type === "research") {
+      if (!journalPaperTitle.trim()) {
+        alert("A reputed academic journal assignment requires selecting and entering a paper title in high-end peer reviews!");
+        return;
+      }
+      if (!paperGist.trim()) {
+        alert("Please provide the absolute executive gist of your selected journal paper!");
+        return;
+      }
+      if (!pptFileName.trim()) {
+        alert("Please link or upload your presentation PPT file so peers can grade your slides!");
+        return;
+      }
+      if (!videoFileName.trim()) {
+        alert("Please provide your video self-recording presenting this research paper!");
+        return;
+      }
+    }
+
     if (editorText.trim().length < 100) {
       alert("A brief paragraph isn't quite enough to address these deep assignment rubrics. Expand your central thesis to at least 100 characters before deploying!");
       return;
@@ -113,6 +184,14 @@ export default function StudentDashboard({
     setIsAiGrading(true);
     setGradingError(null);
 
+    const extra = {
+      journalPaperTitle: journalPaperTitle.trim(),
+      paperGist: paperGist.trim(),
+      pptFileName: pptFileName.trim(),
+      videoFileName: videoFileName.trim(),
+      classroomCode: activeAssignment.classroomCode
+    };
+
     try {
       // Call modern server route to generate real AI grading report
       const response = await fetch("/api/eval-submission", {
@@ -121,7 +200,7 @@ export default function StudentDashboard({
         body: JSON.stringify({
           assignmentTitle: activeAssignment.title,
           assignmentDescription: activeAssignment.description,
-          studentContent: editorText,
+          studentContent: `${editorText}\n\n[JOURNAL]: ${journalPaperTitle}\n[GIST]: ${paperGist}\n[PPT PLAN]: ${pptFileName}\n[PRESENTATION]: ${videoFileName}`,
           rubrics: activeAssignment.rubric
         })
       });
@@ -131,7 +210,7 @@ export default function StudentDashboard({
       }
 
       const aiFinalFeedback: AIFeedback = await response.json();
-      onSubmitSubmission(selectedAsgId, editorText, aiFinalFeedback);
+      onSubmitSubmission(selectedAsgId, editorText, aiFinalFeedback, extra);
       setSubmittedSubTab('ai-feedback');
     } catch (err: any) {
       console.warn("AI Grading endpoint offline or failed. Applying fallback mock assessment.", err);
@@ -151,7 +230,7 @@ export default function StudentDashboard({
           feedback: `Good effort addressing ${r.category}. Cite more direct historical definitions to push into the top bracket.`
         })),
         strengths: [
-          "Thesis is stated clearly in the opening paragraphs.",
+          "Thesis is stated clearly in the essays files.",
           "Good attempt to frame the discussion using relevant vocabulary terms."
         ],
         improvements: [
@@ -165,7 +244,7 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
       };
 
       setTimeout(() => {
-        onSubmitSubmission(selectedAsgId, editorText, fallbackFeedback);
+        onSubmitSubmission(selectedAsgId, editorText, fallbackFeedback, extra);
         setIsAiGrading(false);
         setSubmittedSubTab('ai-feedback');
       }, 1500);
@@ -175,7 +254,26 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
     }
   };
 
-  const handlePostPeerCritique = (e: React.FormEvent) => {
+  const handleJoinClassroomSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setJoinError(null);
+    setJoinSuccess(null);
+    
+    if (!joinClassCode.trim()) {
+      setJoinError("Please key in a valid classroom code.");
+      return;
+    }
+    
+    const success = onJoinClassroom(joinClassCode.trim());
+    if (success) {
+      setJoinSuccess(`Enrolled successfully in class code: ${joinClassCode.trim().toUpperCase()}!`);
+      setJoinClassCode("");
+    } else {
+      setJoinError(`Class code "${joinClassCode.trim().toUpperCase()}" was not found. Verify code with your faculty instructor.`);
+    }
+  };
+
+  const handlePostPeerCritique = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPeerSubId) return;
 
@@ -184,19 +282,178 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
       return;
     }
 
+    setIsModerating(true);
+    setModerationWarning(null);
+
+    // Compute peer score sum
+    const rubricMax = activeAssignment?.rubric.reduce((acc, cr) => acc + cr.maxPoints, 0) || 100;
+    const computedScore = activeAssignment?.rubric.reduce((acc, cr) => {
+      const scoreVal = peerScores[cr.id] !== undefined ? peerScores[cr.id] : Math.round(cr.maxPoints * 0.85);
+      return acc + scoreVal;
+    }, 0) || 85;
+
+    const finalPctScore = rubricMax > 0 ? Math.round((computedScore / rubricMax) * 100) : 85;
+
+    try {
+      const response = await fetch("/api/moderate-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commentStrengths: peerGoodComments,
+          commentImprovements: peerImproveComments,
+          guidelines: activeAssignment?.peerReviewGuidelines || ""
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to contact active safe scrutiny systems.");
+      }
+
+      const status = await response.json();
+
+      if (status.isFlagged) {
+        // Show interactive warning modal/dialog inline
+        setModerationWarning({
+          flagReason: status.flagReason,
+          suggestedRevision: status.suggestedRevision,
+          scoreGiven: finalPctScore,
+          strengths: peerGoodComments,
+          improvements: peerImproveComments
+        });
+        return;
+      }
+
+      // No flag, continue to publish review immediately!
+      const newReview: PeerReview = {
+        id: `pr_${Date.now()}`,
+        submissionId: selectedPeerSubId,
+        assignmentId: selectedAsgId,
+        authorId: currentStudent.id,
+        authorName: currentStudent.name,
+        reviewerName: currentStudent.name,
+        scores: { ...peerScores },
+        scoreGiven: finalPctScore,
+        commentStrengths: peerGoodComments,
+        commentImprovements: peerImproveComments,
+        isFlagged: false,
+        flagReason: "",
+        suggestedRevision: "",
+        flagCheckedByTeacher: false,
+        qualityRating: status.qualityRating || "satisfactory",
+        submittedAt: new Date().toISOString()
+      };
+
+      onSubmitPeerReview(newReview);
+      setPeerSuccessMsg(true);
+      setPeerGoodComments("");
+      setPeerImproveComments("");
+      setTimeout(() => {
+        setPeerSuccessMsg(false);
+        setSelectedPeerSubId(null);
+      }, 2000);
+
+    } catch (err) {
+      console.warn("Safety filtering offline. Registering critique directly (Local Offline Simulation checks).");
+      
+      // Standby offline local moderation check
+      const textTotal = (peerGoodComments + " " + peerImproveComments).toLowerCase();
+      let isFlagged = false;
+      let flagReason = "";
+      let suggestedRevision = "";
+      
+      if (peerGoodComments.trim().split(/\s+/).length < 4 || peerImproveComments.trim().split(/\s+/).length < 4) {
+        isFlagged = true;
+        flagReason = "Critique responses are extremely brief or low-effort.";
+        suggestedRevision = `Wonderful deontology critique! Try expanding: "${peerGoodComments.trim()} Although you asserted the core premising details nicely, introducing explicit structural details is advised."`;
+      } else if (textTotal.includes("stupid") || textTotal.includes("idiot") || textTotal.includes("trash") || textTotal.includes("bad work")) {
+        isFlagged = true;
+        flagReason = "Vulgar or unscholarly language detected. Critiques should comment neutrally on arguments.";
+        suggestedRevision = "Polite rewrite: 'The arguments are presented nicely, though exploring additional counterarguments would elevate structural standings.'";
+      }
+
+      if (isFlagged) {
+        setModerationWarning({
+          flagReason,
+          suggestedRevision,
+          scoreGiven: finalPctScore,
+          strengths: peerGoodComments,
+          improvements: peerImproveComments
+        });
+        return;
+      }
+
+      const newReview: PeerReview = {
+        id: `pr_${Date.now()}`,
+        submissionId: selectedPeerSubId,
+        assignmentId: selectedAsgId,
+        authorId: currentStudent.id,
+        authorName: currentStudent.name,
+        reviewerName: currentStudent.name,
+        scores: { ...peerScores },
+        scoreGiven: finalPctScore,
+        commentStrengths: peerGoodComments,
+        commentImprovements: peerImproveComments,
+        isFlagged: false,
+        flagReason: "",
+        suggestedRevision: "",
+        flagCheckedByTeacher: false,
+        qualityRating: "satisfactory",
+        submittedAt: new Date().toISOString()
+      };
+
+      onSubmitPeerReview(newReview);
+      setPeerSuccessMsg(true);
+      setPeerGoodComments("");
+      setPeerImproveComments("");
+      setTimeout(() => {
+        setPeerSuccessMsg(false);
+        setSelectedPeerSubId(null);
+      }, 2000);
+
+    } finally {
+      setIsModerating(false);
+    }
+  };
+
+  const handleSubmitBypassingModeration = (useAIRevision: boolean) => {
+    if (!selectedPeerSubId || !moderationWarning) return;
+
+    let finalStrengths = moderationWarning.strengths;
+    let finalImprovements = moderationWarning.improvements;
+    let flaggedStatus = true;
+    let reasonText = moderationWarning.flagReason;
+    let suggestedText = moderationWarning.suggestedRevision;
+
+    if (useAIRevision && moderationWarning.suggestedRevision) {
+      // Re-organize strengths & improvements to use AI suggestion
+      finalStrengths = "I liked the general direction, thesis statement, and evidence applied to deontology.";
+      finalImprovements = moderationWarning.suggestedRevision;
+      flaggedStatus = false; // Resolved immediately!
+      reasonText = "";
+      suggestedText = "";
+    }
+
     const newReview: PeerReview = {
       id: `pr_${Date.now()}`,
       submissionId: selectedPeerSubId,
       assignmentId: selectedAsgId,
       authorId: currentStudent.id,
       authorName: currentStudent.name,
+      reviewerName: currentStudent.name,
       scores: { ...peerScores },
-      commentStrengths: peerGoodComments,
-      commentImprovements: peerImproveComments,
+      scoreGiven: moderationWarning.scoreGiven,
+      commentStrengths: finalStrengths,
+      commentImprovements: finalImprovements,
+      isFlagged: flaggedStatus,
+      flagReason: reasonText,
+      suggestedRevision: suggestedText,
+      flagCheckedByTeacher: false,
+      qualityRating: useAIRevision ? "excellent" : "needs_improvement",
       submittedAt: new Date().toISOString()
     };
 
     onSubmitPeerReview(newReview);
+    setModerationWarning(null);
     setPeerSuccessMsg(true);
     setPeerGoodComments("");
     setPeerImproveComments("");
@@ -223,95 +480,121 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
 
   return (
     <div className="space-y-6" id="student-dashboard">
-      {/* Top Welcome Panel */}
-      <div className="bg-slate-900 border border-slate-800 text-white rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4" id="student-hero">
-        <div className="flex items-center gap-3" id="student-identity-group">
-          <img 
-            src={currentStudent.avatarUrl} 
-            alt={currentStudent.name} 
-            className="w-12 h-12 rounded-full border-2 border-amber-400 shrink-0 object-cover" 
-            referrerPolicy="no-referrer"
-          />
+      {/* Top Welcome Panel in Bento Style */}
+      <div className="bg-slate-900 border border-slate-850 text-white rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4" id="student-hero">
+        <div className="flex items-center gap-4.5" id="student-identity-group">
+          <div className="relative shrink-0" id="avatar-container">
+            <img 
+              src={currentStudent.avatarUrl} 
+              alt={currentStudent.name} 
+              className="w-14 h-14 rounded-full border-2 border-indigo-400 shrink-0 object-cover shadow-sm bg-slate-800" 
+              referrerPolicy="no-referrer"
+            />
+            <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full"></span>
+          </div>
           <div>
-            <h2 className="text-lg font-bold font-sans tracking-tight flex items-center gap-1.5" id="student-welcome-title">
+            <h2 className="text-xl font-bold font-display tracking-tight flex items-center gap-2" id="student-welcome-title">
               Hello, {currentStudent.name}!
-              <span className="text-[10px] font-mono text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">Student</span>
+              <span className="text-[10px] uppercase tracking-widest font-mono text-indigo-300 bg-indigo-500/15 px-2.5 py-0.5 rounded-full border border-indigo-500/30 font-bold">Student Badge</span>
             </h2>
-            <p className="text-xs text-slate-300">Topic: <strong>{activeAssignment?.title}</strong> &bull; Completed Reviews: <strong>{myReviewsCount}</strong></p>
+            <p className="text-xs text-slate-400 font-sans mt-0.5">Active Arena: <strong className="text-slate-200">{activeAssignment?.title}</strong> &bull; Completed Reviews: <strong className="text-indigo-300">{myReviewsCount}</strong></p>
           </div>
         </div>
 
-        <div className="flex gap-2 p-1 bg-slate-850 border border-slate-800 rounded-lg self-start md:self-auto" id="student-menu-tabs">
+        <div className="flex gap-1.5 p-1 bg-slate-800/80 border border-slate-700/50 rounded-full self-start md:self-auto flex-wrap" id="student-menu-tabs">
           <button
             id="tab-student-discussion"
+            type="button"
             onClick={() => setActiveTab('discussion')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-md transition ${activeTab === 'discussion' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-300 hover:text-white'}`}
+            className={`px-5 py-2 text-xs font-bold rounded-full transition-all duration-200 ${activeTab === 'discussion' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-350 hover:text-white hover:bg-slate-700/40'}`}
           >
             <div className="flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5" />
               Discussion Arena
             </div>
           </button>
+          
           <button
             id="tab-student-peerreview"
+            type="button"
             onClick={() => { setActiveTab('peer-review'); setSelectedPeerSubId(null); }}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-md transition ${activeTab === 'peer-review' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-300 hover:text-white'}`}
+            className={`px-5 py-2 text-xs font-bold rounded-full transition-all duration-200 ${activeTab === 'peer-review' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-350 hover:text-white hover:bg-slate-700/40'}`}
           >
             <div className="flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5" />
               Critique Peers Anonymously
             </div>
           </button>
-        </div>
-      </div>
 
-      {/* Assignment Prompt selector */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-white border border-gray-150 p-4 rounded-xl gap-3 shadow-xs" id="student-selector">
-        <div className="flex items-center gap-2" id="student-choice">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Active Choice</span>
-          <select
-            id="select-asg-student"
-            value={selectedAsgId}
-            onChange={(e) => { setSelectedAsgId(e.target.value); setSelectedPeerSubId(null); }}
-            className="text-xs font-bold border border-gray-250 rounded-lg text-slate-950 bg-gray-50 focus:ring-1 focus:ring-amber-500 py-1.5 px-3 cursor-pointer select-none"
+          <button
+            id="tab-student-classrooms"
+            type="button"
+            onClick={() => setActiveTab('joined-classrooms')}
+            className={`px-5 py-2 text-xs font-bold rounded-full transition-all duration-200 ${activeTab === 'joined-classrooms' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-350 hover:text-white hover:bg-slate-700/40'}`}
           >
-            {assignments.map(a => (
-              <option key={a.id} value={a.id}>{a.title}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="text-[11px] text-gray-500 leading-normal max-w-xl md:text-right" id="student-limits-info">
-          Please respond to the assigned topic with clear claims, applying respective philosophical/policy frameworks. Your reply will be graded on a <strong>{totalMaxScore}-point</strong> rubric matrix.
+            <div className="flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+              Join Class Code
+            </div>
+          </button>
         </div>
       </div>
+
+      {/* Assignment Prompt selector in Bento Style */}
+      {activeTab !== 'joined-classrooms' && (
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-white border border-slate-200 p-4.5 rounded-2xl gap-3 shadow-sm select-container" id="student-selector">
+          <div className="flex items-center gap-2.5" id="student-choice">
+            <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-widest font-sans">Active Prompt</span>
+            <select
+              id="select-asg-student"
+              value={selectedAsgId}
+              onChange={(e) => { setSelectedAsgId(e.target.value); setSelectedPeerSubId(null); }}
+              className="text-xs font-bold border border-slate-250 rounded-xl text-slate-800 bg-slate-50 hover:bg-slate-100 focus:ring-2 focus:ring-indigo-500/20 py-2 py-2.5 px-3.5 cursor-pointer focus:outline-hidden transition-all select-none"
+            >
+              {filteredAssignments.map(a => (
+                <option key={a.id} value={a.id}>{a.title}</option>
+              ))}
+              {filteredAssignments.length === 0 && (
+                <option value="">No enrolled classroom assignments. Enter a Class code in the Classrooms tab!</option>
+              )}
+            </select>
+          </div>
+
+          <div className="text-[11px] text-slate-500 font-sans leading-normal max-w-xl md:text-right" id="student-limits-info">
+            Please respond with clear claims, applying respective philosophical/policy frameworks. Your reply is scored on a <strong className="text-indigo-650 font-bold">{totalMaxScore}-point</strong> integrated rubric matrix.
+          </div>
+        </div>
+      )}
 
       {/* DISCUSSION ARENA VIEW */}
       {activeTab === 'discussion' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="student-arena-view">
           {/* Left panel: Prompt guidelines & response editor OR submitted displays */}
           <div className="lg:col-span-8 space-y-6" id="arena-editor-col">
-            {/* 1. Prompt Details Card */}
-            <div className="bg-white border border-gray-150 rounded-xl p-5 shadow-xs space-y-4" id="assignment-prompt-card">
-              <div className="border-b border-gray-100 pb-2.5" id="prompt-header">
-                <span className="text-[10px] text-violet-950 bg-violet-50 font-mono font-semibold px-2 py-0.5 rounded-full border border-violet-100 uppercase tracking-wider">Prompt Criteria Details</span>
-                <h3 className="text-sm font-bold text-slate-950 mt-1.5 font-sans">{activeAssignment?.title}</h3>
+            {/* 1. Prompt Details Card in Bento Style */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4" id="assignment-prompt-card">
+              <div className="border-b border-slate-100 pb-3" id="prompt-header">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0"></span>
+                  <span className="text-[10px] text-slate-400 font-sans font-bold uppercase tracking-widest">Assignment Brief & Prompt Criteria</span>
+                </div>
+                <h3 className="text-lg font-bold text-slate-800 mt-1 font-display tracking-tight leading-snug">{activeAssignment?.title}</h3>
               </div>
-              <p className="text-xs text-gray-600 leading-relaxed font-sans bg-gray-50/50 p-4 border border-gray-150 rounded-xl">
+              <p className="text-xs text-slate-600 leading-relaxed font-sans bg-slate-50/50 p-4 border border-slate-100 rounded-xl">
                 {activeAssignment?.description}
               </p>
 
               {/* Collapsible/Sleek Rubric visualizer so student knows expectations */}
-              <div className="space-y-2 pt-1" id="assignment-rubrics-checklist">
-                <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Grading Checklist</h4>
+              <div className="space-y-3 pt-1" id="assignment-rubrics-checklist">
+                <h4 className="text-[10.5px] font-bold text-slate-400 font-sans uppercase tracking-widest">Discussion Canvas Grid Guidelines</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3" id="student-prompt-rubrics-grid">
                   {activeAssignment?.rubric.map((rub, rIdx) => (
-                    <div key={rub.id} className="p-3 bg-slate-50/50 border border-slate-205 border-gray-200 rounded-lg" id={`prompt-rub-card-${rIdx}`}>
-                      <div className="flex justify-between items-center text-xs pb-0.5 border-b border-gray-200/50 mb-1" id={`rub-head-${rIdx}`}>
-                        <strong className="font-semibold text-slate-900 truncate">{rub.category}</strong>
-                        <span className="font-mono text-[10px] text-gray-400 font-bold shrink-0">{rub.maxPoints} pts</span>
+                    <div key={rub.id} className="p-4 bg-slate-50/60 border border-slate-150 rounded-xl hover:bg-slate-50 transition duration-150" id={`prompt-rub-card-${rIdx}`}>
+                      <div className="flex justify-between items-center text-xs pb-1 border-b border-slate-200/60 mb-2" id={`rub-head-${rIdx}`}>
+                        <strong className="font-bold text-slate-800 font-display">{rub.category}</strong>
+                        <span className="font-mono text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md font-extrabold shrink-0 border border-indigo-100/50">{rub.maxPoints} pts</span>
                       </div>
-                      <p className="text-[10px] text-gray-500 leading-normal">{rub.description}</p>
+                      <p className="text-[10.5px] text-slate-500 leading-normal">{rub.description}</p>
                     </div>
                   ))}
                 </div>
@@ -320,44 +603,120 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
 
             {/* AI Grading Loader Overlay */}
             {isAiGrading && (
-              <div className="bg-white border border-violet-100 rounded-xl p-12 text-center shadow-lg space-y-3 flex flex-col items-center justify-center animate-pulse" id="student-grading-loader">
-                <Loader2 className="w-10 h-10 text-violet-850 animate-spin text-violet-800" />
-                <h3 className="text-sm font-bold text-violet-950 font-sans mt-2">AI Classroom Grading Assistant is Reading...</h3>
-                <p className="text-xs text-gray-400 max-w-sm">Applying linguistic parsers to analyze arguments, calculating exact score values, and writing high-fidelity rubric feedback reports.</p>
-                <div className="flex gap-1 bg-violet-50 px-3 py-1 rounded border border-violet-100 text-[10px] font-mono text-violet-700 animate-bounce">
-                  <span>Evaluating: Writing, Core Evidence, Structure</span>
+              <div className="bg-white border border-indigo-100 rounded-2xl p-12 text-center shadow-md space-y-4 flex flex-col items-center justify-center animate-pulse" id="student-grading-loader">
+                <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+                <h3 className="text-base font-bold text-slate-850 font-display mt-2 text-indigo-950">AI Diagnostic Ledger Grading Is Active...</h3>
+                <p className="text-xs text-slate-500 max-w-sm leading-relaxed">Applying neural semantic checks to map text structures, calculating point tallies, and writing high-fidelity critique suggestions.</p>
+                <div className="flex gap-2 bg-indigo-50 px-4 py-1.5 rounded-full border border-indigo-100/60 text-[10px] font-mono text-indigo-700 animate-bounce">
+                  <span>Evaluating: Structural Integrity & Evidence Claims</span>
                 </div>
               </div>
             )}
 
             {/* 2. Display Input Editor (Unsubmitted State) OR Display Feedback Pages (Submitted State) */}
             {!isAiGrading && (!mySubmission || mySubmission.status === 'draft') ? (
-              <div className="bg-white border border-gray-150 rounded-xl p-6 shadow-sm space-y-4" id="submission-editor">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4 animate-fade-in" id="submission-editor">
                 <div className="flex justify-between items-center" id="editor-header">
-                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                    <FileText className="w-4 h-4 text-amber-500" />
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 font-display">
+                    <FileText className="w-4 h-4 text-indigo-600" />
                     Write Assignment Response
                   </span>
-                  <span className="text-[10px] font-mono text-gray-400">
-                    Characters: <strong>{editorText.length}</strong> (Recommended: &gt;100)
+                  <span className="text-[10.5px] font-mono text-slate-400 font-semibold bg-slate-100 px-2.5 py-0.5 rounded-full">
+                    Chars: <strong className="text-slate-800">{editorText.length}</strong> (Minimum: 100)
                   </span>
                 </div>
 
-                <textarea
-                  id="textarea-essay"
-                  rows={14}
-                  value={editorText}
-                  onChange={(e) => setEditorText(e.target.value)}
-                  placeholder="Formulate your critical thinking, backing up claims with ethical theories or policy dynamics. Keep logic cohesive and structured..."
-                  className="bg-gray-50 border border-gray-250 p-4 text-xs font-sans text-slate-950 leading-relaxed rounded-xl w-full focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-gray-400"
-                />
+                {activeAssignment?.type === "research" && (
+                  <div className="p-4 bg-slate-50 border border-slate-220 rounded-xl space-y-4 animate-fade-in" id="research-paper-fields-container">
+                    <span className="text-[10px] font-mono font-bold text-slate-450 uppercase tracking-wider block">JOURNAL RESEARCH ARTIFACTS REQUIRED</span>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="input-journal-title" className="text-xs font-bold text-slate-800 block mb-1">Reputed Journal Paper Title</label>
+                        <input
+                          id="input-journal-title"
+                          type="text"
+                          required
+                          placeholder="e.g., Attention Is All You Need (ACM/IEEE)"
+                          value={journalPaperTitle}
+                          onChange={(e) => setJournalPaperTitle(e.target.value)}
+                          className="bg-white border border-slate-205 p-3 text-xs w-full rounded-xl text-slate-900 focus:ring-1 focus:ring-indigo-650 font-sans"
+                        />
+                      </div>
 
-                <div className="pt-2 border-t border-gray-100 flex justify-between gap-3" id="editor-actions">
+                      <div>
+                        <label htmlFor="input-ppt-file" className="text-xs font-bold text-slate-800 block mb-1">Presentation Slides File Link / Name</label>
+                        <input
+                          id="input-ppt-file"
+                          type="text"
+                          required
+                          placeholder="e.g., Attention_Slides_Deck.pptx"
+                          value={pptFileName}
+                          onChange={(e) => setPptFileName(e.target.value)}
+                          className="bg-white border border-slate-205 p-3 text-xs w-full rounded-xl text-slate-900 focus:ring-1 focus:ring-indigo-650 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="input-video-file" className="text-xs font-bold text-slate-800 block mb-1">Recorded Self-Presentation (Video/MP4 Filename)</label>
+                        <input
+                          id="input-video-file"
+                          type="text"
+                          required
+                          placeholder="e.g., Attention_Presentation.mp4"
+                          value={videoFileName}
+                          onChange={(e) => setVideoFileName(e.target.value)}
+                          className="bg-white border border-slate-205 p-3 text-xs w-full rounded-xl text-slate-900 focus:ring-1 focus:ring-indigo-650 font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-800 block mb-1">Allowed Format Rights (Teacher Controlled)</label>
+                        <div className="flex gap-1.5 pt-1.5" id="enforced-file-pills">
+                          {(activeAssignment.allowedDocTypes || ["PDF", "PPTX", "MP4"]).map(ext => (
+                            <span key={ext} className="bg-slate-200 text-slate-700 font-mono text-[9px] font-bold px-2.5 py-1 rounded-md uppercase border border-slate-300">
+                              .{ext}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="input-paper-gist" className="text-xs font-bold text-slate-800 block mb-1">Executive Gist (Scientific Paper summary abstract)</label>
+                      <textarea
+                        id="input-paper-gist"
+                        rows={3}
+                        required
+                        placeholder="Type a highly dense academic abstract or summary of the journal's scientific breakthroughs..."
+                        value={paperGist}
+                        onChange={(e) => setPaperGist(e.target.value)}
+                        className="bg-white border border-slate-205 p-3 text-xs w-full rounded-xl text-slate-900 focus:ring-1 focus:ring-indigo-650 font-sans"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="textarea-essay" className="text-[11px] font-bold text-slate-700 block mb-1">Final Critical Critique Essay (Minimum: 100 char)</label>
+                  <textarea
+                    id="textarea-essay"
+                    rows={14}
+                    value={editorText}
+                    onChange={(e) => setEditorText(e.target.value)}
+                    placeholder="Formulate your critical thinking, backing up claims with ethical theories or policy dynamics. Keep logic cohesive and structured..."
+                    className="bg-slate-50 border border-slate-200 p-4 text-xs font-sans text-slate-800 leading-relaxed rounded-xl w-full focus:outline-hidden focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all placeholder:text-slate-400 italic font-medium"
+                  />
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex justify-between gap-3" id="editor-actions">
                   <button
                     id="btn-save-draft"
                     type="button"
                     onClick={handleSaveDraftLocal}
-                    className="px-4 py-2 hover:bg-slate-50 border border-gray-250 text-slate-800 text-xs font-semibold rounded-lg transition cursor-pointer"
+                    className="px-4.5 py-2.5 hover:bg-slate-50 border border-slate-250 text-slate-700 text-xs font-bold rounded-xl transition duration-150 cursor-pointer text-center"
                   >
                     Save Draft Locally
                   </button>
@@ -365,7 +724,7 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                     id="btn-submit-final"
                     type="button"
                     onClick={handleSubmitFinalEssay}
-                    className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 font-bold text-xs text-slate-950 rounded-lg shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 font-bold text-xs text-white rounded-xl shadow-xs flex items-center gap-1.5 transition-all duration-150 cursor-pointer"
                   >
                     Submit Response &bull; Request AI Grading
                     <Send className="w-3.5 h-3.5" />
@@ -374,16 +733,16 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
               </div>
             ) : !isAiGrading && mySubmission && mySubmission.status === 'submitted' ? (
               /* SUBMITTED FORUM VIEW: My paper, AI evaluations, Peer review reports */
-              <div className="bg-white border border-gray-150 rounded-xl overflow-hidden shadow-xs" id="submitted-view-card">
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm animate-fade-in" id="submitted-view-card">
                 {/* Submitted sub tab bar header */}
-                <div className="bg-slate-50 border-b border-gray-200 p-3.5 flex flex-wrap justify-between items-center gap-2" id="submitted-view-subtabs">
-                  <div className="flex gap-1" id="student-internal-tabs">
+                <div className="bg-slate-50 border-b border-slate-200 p-4 flex flex-wrap justify-between items-center gap-3.5" id="submitted-view-subtabs">
+                  <div className="flex gap-1.5" id="student-internal-tabs">
                     <button
                       id="subtab-ai-feedback"
                       onClick={() => setSubmittedSubTab('ai-feedback')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded ${submittedSubTab === 'ai-feedback' ? 'bg-violet-800 text-white font-bold' : 'text-gray-600 hover:bg-gray-100'}`}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${submittedSubTab === 'ai-feedback' ? 'bg-indigo-600 text-white shadow-xs font-bold' : 'text-slate-500 hover:bg-slate-200/50'}`}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <Cpu className="w-3.5 h-3.5" />
                         AI Feedback Critique
                       </div>
@@ -391,9 +750,9 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                     <button
                       id="subtab-my-text"
                       onClick={() => setSubmittedSubTab('my-text')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded ${submittedSubTab === 'my-text' ? 'bg-slate-800 text-white font-bold' : 'text-gray-600 hover:bg-gray-100'}`}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${submittedSubTab === 'my-text' ? 'bg-slate-800 text-white font-bold' : 'text-slate-500 hover:bg-slate-200/50'}`}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <FileText className="w-3.5 h-3.5" />
                         My Submission Text
                       </div>
@@ -401,9 +760,9 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                     <button
                       id="subtab-all-reviews"
                       onClick={() => setSubmittedSubTab('all-reviews')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded ${submittedSubTab === 'all-reviews' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-gray-600 hover:bg-gray-100'}`}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${submittedSubTab === 'all-reviews' ? 'bg-teal-650 bg-teal-600 text-white font-bold' : 'text-slate-500 hover:bg-slate-200/50'}`}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5" />
                         Peer Reviews Received
                       </div>
@@ -411,15 +770,15 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                   </div>
 
                   {/* Submission date */}
-                  <span className="text-[10px] text-gray-400 font-mono">
-                    Locked for assessment: {new Date(mySubmission.submittedAt).toLocaleDateString()}
+                  <span className="text-[10px] text-slate-400 font-mono font-bold tracking-wider">
+                    LOCKED FOR ASSESS: {new Date(mySubmission.submittedAt).toLocaleDateString()}
                   </span>
                 </div>
 
                 {/* Sub-tab 1: My original text */}
                 {submittedSubTab === 'my-text' && (
                   <div className="p-6 space-y-4 animate-fade-in" id="submitted-my-text-con">
-                    <div className="bg-gray-50 border border-gray-200 p-5 rounded-xl text-xs text-gray-800 leading-relaxed font-sans whitespace-pre-wrap">
+                    <div className="bg-slate-50 border border-slate-100 p-6 rounded-xl text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap italic">
                       {mySubmission.content}
                     </div>
                   </div>
@@ -429,7 +788,7 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                 {submittedSubTab === 'ai-feedback' && (
                   <div className="p-6 space-y-6 animate-fade-in" id="submitted-ai-feedback-con">
                     {gradingError && (
-                      <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-950 text-xs rounded-lg flex items-center gap-1.5">
+                      <div className="p-3 bg-amber-50 border border-amber-100 text-amber-950 text-xs rounded-xl flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                         <span>{gradingError}</span>
                       </div>
@@ -438,39 +797,39 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                     {mySubmission.aiFeedback ? (
                       <div className="space-y-6" id="student-ai-feedback-container">
                         {/* Overall score indicator */}
-                        <div className="p-5 bg-violet-600 text-white rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm" id="scorecard-hero">
+                        <div className="p-6 bg-slate-900 text-white rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl border border-slate-800" id="scorecard-hero">
                           <div>
-                            <div className="flex items-center gap-1.5 mb-1 text-violet-200 text-xs font-bold uppercase tracking-wider">
-                              <Sparkles className="w-4 h-4 text-yellow-300" />
+                            <div className="flex items-center gap-1.5 mb-1.5 text-indigo-300 text-xs font-bold uppercase tracking-wider font-display">
+                              <Sparkles className="w-4 h-4 text-indigo-400" />
                               AI Multi-Criteria Assay Score
                             </div>
-                            <h4 className="text-xl font-bold font-sans">Automated Diagnostic Grading</h4>
-                            <p className="text-[11px] text-violet-100 mt-1 max-w-md leading-relaxed">This diagnostic breakdown computes score tally based on each criteria category's guidelines.</p>
+                            <h4 className="text-lg font-bold font-display tracking-tight text-white">Automated Diagnostic Grading Blueprint</h4>
+                            <p className="text-[11px] text-slate-400 mt-1 max-w-md leading-relaxed">This semantic analysis maps structural claims to grade suggestions instantly against point criteria definitions.</p>
                           </div>
                           
-                          <div className="px-6 py-3.5 bg-violet-850 bg-violet-900 border border-violet-500/10 text-center rounded-xl shrink-0 h-full" id="overall-scorecard">
-                            <span className="text-[10px] block font-mono font-bold text-violet-200">TOTAL MARK</span>
-                            <span className="text-2xl font-mono font-bold leading-none">{mySubmission.aiFeedback.overallScore}<span className="text-sm font-semibold opacity-70">/{mySubmission.aiFeedback.maxScore}</span></span>
+                          <div className="px-6 py-4 bg-slate-950/80 border border-slate-800 text-center rounded-xl shrink-0" id="overall-scorecard">
+                            <span className="text-[9px] block font-mono font-extrabold text-indigo-300 tracking-widest uppercase mb-0.5">TOTAL SCORE</span>
+                            <span className="text-3xl font-display font-black leading-none text-white">{mySubmission.aiFeedback.overallScore}<span className="text-sm font-semibold opacity-60">/{mySubmission.aiFeedback.maxScore}</span></span>
                           </div>
                         </div>
 
                         {/* Criteria details mapping */}
                         <div className="space-y-3" id="ai-feedback-criteria-scores">
-                          <h5 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Detailed Score Breakdown</h5>
+                          <h5 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1 font-sans">Rubrics Diagnostics Ledger</h5>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="feedback-scores-grid">
                             {mySubmission.aiFeedback.rubricScores.map((sc, idx) => {
                               const pct = sc.maxPoints > 0 ? (sc.score / sc.maxPoints) * 100 : 0;
                               return (
-                                <div key={idx} className="p-4 border border-violet-100 bg-violet-50/10 rounded-xl flex flex-col justify-between" id={`feedback-score-sc-${idx}`}>
+                                <div key={idx} className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl flex flex-col justify-between" id={`feedback-score-sc-${idx}`}>
                                   <div>
-                                    <div className="flex justify-between items-center pb-1.5 border-b border-gray-100 gap-2" id={`feedback-score-head-${idx}`}>
-                                      <strong className="text-xs font-semibold text-slate-950 truncate">{sc.category}</strong>
-                                      <span className="text-xs font-mono font-bold text-violet-900 shrink-0">{sc.score} / {sc.maxPoints}</span>
+                                    <div className="flex justify-between items-center pb-2 border-b border-slate-105 gap-2" id={`feedback-score-head-${idx}`}>
+                                      <strong className="text-xs font-bold text-slate-850 font-display truncate">{sc.category}</strong>
+                                      <span className="text-xs font-mono font-extrabold text-indigo-650 bg-indigo-50 px-2 py-0.5 border border-indigo-100/50 rounded-md shrink-0">{sc.score} / {sc.maxPoints}</span>
                                     </div>
-                                    <p className="text-[10.5px] text-gray-500 leading-normal mt-2">{sc.feedback}</p>
+                                    <p className="text-[11px] text-slate-500 leading-relaxed mt-2.5 font-sans">{sc.feedback}</p>
                                   </div>
-                                  <div className="w-full bg-violet-100/50 rounded-full h-1 mt-3.5 overflow-hidden" id={`feedback-score-bar-p-${idx}`}>
-                                    <div className="bg-violet-800 h-1 rounded-full" style={{ width: `${pct}%` }} />
+                                  <div className="w-full bg-slate-100 rounded-full h-1.5 mt-4 overflow-hidden" id={`feedback-score-bar-p-${idx}`}>
+                                    <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${pct}%` }} />
                                   </div>
                                 </div>
                               );
@@ -479,12 +838,12 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                         </div>
 
                         {/* Strengths & Improvements */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-gray-150" id="ai-feedback-balance-panels">
-                          <div className="space-y-2" id="st-strengths">
-                            <h5 className="text-[10px] font-bold text-emerald-900 uppercase tracking-widest pb-1 pl-1">Strengths to Leverage</h5>
-                            <div className="space-y-2" id={`st-gr-strs`}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-slate-250/60" id="ai-feedback-balance-panels">
+                          <div className="space-y-3" id="st-strengths">
+                            <h5 className="text-[10px] font-bold text-emerald-900 uppercase tracking-widest pl-1 font-sans">Strengths to Leverage</h5>
+                            <div className="space-y-2.5" id={`st-gr-strs`}>
                               {mySubmission.aiFeedback.strengths.map((st, idx) => (
-                                <div key={idx} className="p-3 bg-emerald-50/65 border border-emerald-100 rounded-lg text-emerald-950 text-xs font-medium flex gap-2 items-start leading-relaxed" id={`feedback-strength-div-${idx}`}>
+                                <div key={idx} className="p-4 bg-emerald-50/60 border border-emerald-100/80 rounded-xl text-emerald-950 text-xs font-semibold flex gap-2.5 items-start leading-relaxed shadow-xs" id={`feedback-strength-div-${idx}`}>
                                   <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                                   <span>{st}</span>
                                 </div>
@@ -492,12 +851,12 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                             </div>
                           </div>
 
-                          <div className="space-y-2" id="st-improvements">
-                            <h5 className="text-[10px] font-bold text-amber-900 uppercase tracking-widest pb-1 pl-1">Critique Advice</h5>
-                            <div className="space-y-2" id={`st-gr-imps`}>
+                          <div className="space-y-3" id="st-improvements">
+                            <h5 className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest pl-1 font-sans">Critique & Revisions</h5>
+                            <div className="space-y-2.5" id={`st-gr-imps`}>
                               {mySubmission.aiFeedback.improvements.map((im, idx) => (
-                                <div key={idx} className="p-3 bg-amber-50/65 border border-amber-100 rounded-lg text-amber-950 text-xs font-medium flex gap-2 items-start leading-relaxed" id={`feedback-improvement-div-${idx}`}>
-                                  <TrendingUp className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                                <div key={idx} className="p-4 bg-indigo-50/60 border border-indigo-100/80 rounded-xl text-indigo-950 text-xs font-semibold flex gap-2.5 items-start leading-relaxed shadow-xs" id={`feedback-improvement-div-${idx}`}>
+                                  <TrendingUp className="w-4 h-4 text-indigo-650 shrink-0 mt-0.5" />
                                   <span>{im}</span>
                                 </div>
                               ))}
@@ -506,28 +865,28 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                         </div>
 
                         {/* Detailed Analysis Markdown Section */}
-                        <div className="pt-4 border-t border-gray-150 space-y-2" id="ai-feedback-detailed-text">
-                          <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Detailed Essay Critique</h5>
-                          <div className="bg-slate-50 border border-gray-200 rounded-xl p-5 text-xs text-gray-700 leading-relaxed font-sans space-y-4 max-h-[300px] overflow-y-auto">
+                        <div className="pt-4 border-t border-slate-205 space-y-3" id="ai-feedback-detailed-text">
+                          <h5 className="text-[10px] font-bold text-slate-450 uppercase tracking-widest pl-1">Detailed Essay Critique Transcript</h5>
+                          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5.5 text-xs text-slate-700 leading-relaxed font-sans space-y-4 max-h-[300px] overflow-y-auto shadow-inner">
                             {mySubmission.aiFeedback.detailedAnalysis.split("\n").map((line, lIdx) => {
                               const trimmed = line.trim();
                               if (trimmed.startsWith("###")) {
-                                return <h4 key={lIdx} className="text-xs font-bold text-slate-900 mt-3 pt-2 mb-1 border-b border-gray-105 first:mt-0 pb-1">{trimmed.replace(/^###\s*/, "")}</h4>;
+                                return <h4 key={lIdx} className="text-xs font-bold text-indigo-950 mt-4 pt-3 mb-1.5 border-b border-indigo-100 first:mt-0 pb-1 font-display uppercase tracking-wide">{trimmed.replace(/^###\s*/, "")}</h4>;
                               }
                               if (trimmed.startsWith("####")) {
-                                return <h5 key={lIdx} className="text-xs font-semibold text-slate-800 mt-2 mb-1">{trimmed.replace(/^####\s*/, "")}</h5>;
+                                return <h5 key={lIdx} className="text-xs font-bold text-slate-850 mt-2.5 mb-1">{trimmed.replace(/^####\s*/, "")}</h5>;
                               }
                               if (trimmed.startsWith("*") || trimmed.startsWith("-")) {
-                                return <li key={lIdx} className="ml-4 list-disc mb-1 pl-1 text-gray-650">{trimmed.replace(/^[\*\-]\s*/, "")}</li>;
+                                return <li key={lIdx} className="ml-4 list-disc mb-1.5 pl-1 text-slate-650">{trimmed.replace(/^[\*\-]\s*/, "")}</li>;
                               }
-                              if (!trimmed) return <div key={lIdx} className="h-1" />;
-                              return <p key={lIdx} className="text-xs pb-0.5">{trimmed}</p>;
+                              if (!trimmed) return <div key={lIdx} className="h-1.5" />;
+                              return <p key={lIdx} className="text-xs pb-1">{trimmed}</p>;
                             })}
                           </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-center py-12 text-xs text-gray-400 italic" id="feedback-absent">
+                      <div className="text-center py-12 text-slate-400 italic" id="feedback-absent">
                         No AI evaluative feedback records found. Request system assistance.
                       </div>
                     )}
@@ -539,45 +898,45 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                   <div className="p-6 space-y-6 animate-fade-in" id="submitted-reviews-con">
                     {/* Teacher Manual grade display block if exists */}
                     {mySubmission.teacherFeedback ? (
-                      <div className="p-5 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-4" id="teacher-mark-banner">
-                        <div className="p-2 bg-amber-500 rounded-lg text-slate-950 shrink-0" id="teacher-icon-wrap">
-                          <Award className="w-5 h-5 text-slate-950" />
+                      <div className="p-6 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-start gap-4.5 shadow-xs" id="teacher-mark-banner">
+                        <div className="p-2.5 bg-indigo-650 bg-indigo-600 text-white rounded-xl shrink-0" id="teacher-icon-wrap">
+                          <Award className="w-5 h-5 text-white" />
                         </div>
                         <div className="space-y-1.5" id="teacher-notes">
-                          <div className="flex items-center gap-2" id="teacher-assessment-title">
-                            <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Verified Instructor Assessment Grade</h4>
-                            <span className="font-mono font-bold text-amber-950 px-2 py-0.5 bg-amber-200 border border-amber-300 rounded text-xs">
+                          <div className="flex items-center gap-2.5 animate-fade-in" id="teacher-assessment-title">
+                            <h4 className="text-xs font-bold text-indigo-955 text-indigo-900 uppercase tracking-widest font-display">Verified Instructor Assessment Grade</h4>
+                            <span className="font-mono font-bold text-indigo-900 px-2.5 py-0.5 bg-indigo-100 border border-indigo-200 rounded-lg text-xs shrink-0">
                               {mySubmission.teacherFeedback.grade} / {totalMaxScore} pts
                             </span>
                           </div>
-                          <p className="text-xs text-amber-950 leading-relaxed font-sans font-medium italic">
+                          <p className="text-xs text-indigo-900 leading-relaxed font-sans font-semibold italic">
                             &ldquo;{mySubmission.teacherFeedback.comments}&rdquo;
                           </p>
-                          <span className="text-[10px] text-gray-400 block pt-0.5 font-sans font-medium">Graded by Dr. Vance on {new Date(mySubmission.teacherFeedback.givenAt).toLocaleDateString()}</span>
+                          <span className="text-[10px] text-indigo-400 block pt-1 font-sans font-bold uppercase tracking-wider">Assessed by Dr. Vance on {new Date(mySubmission.teacherFeedback.givenAt).toLocaleDateString()}</span>
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-center text-xs text-gray-400 italic mb-2" id="teacher-pending">
-                        Instructor manual grading verification is on agenda. Dr. Vance has not yet overwritten your scorecard.
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-400 italic mb-2" id="teacher-pending">
+                        Instructor manual grading verification is on the agenda. Dr. Vance has not yet overwrote your scoring.
                       </div>
                     )}
 
                     {/* Classmate critiques received */}
                     <div className="space-y-4" id="student-classmate-reviews">
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classmate Peer Reviews ({peerReviews.filter(p => p.submissionId === mySubmission.id).length})</h4>
+                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1 font-sans">Classmate Peer Reviews ({peerReviews.filter(p => p.submissionId === mySubmission.id).length})</h4>
                       
                       {peerReviews.filter(p => p.submissionId === mySubmission.id).length === 0 ? (
-                        <p className="text-xs text-gray-400 italic bg-gray-50/50 p-4 rounded-xl border border-dashed border-gray-200 text-center">Classmate constructive peer submissions have not been logged yet. Check back shortly!</p>
+                        <p className="text-xs text-slate-400 italic bg-slate-50/50 p-5 rounded-xl border border-dashed border-slate-200 text-center">Classmate constructive peer submissions have not been logged yet. Check back shortly!</p>
                       ) : (
                         <div className="space-y-4" id="my-peer-reviews-list">
                           {peerReviews.filter(p => p.submissionId === mySubmission.id).map((pr, idx) => (
-                            <div key={pr.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 hover:border-slate-300 transition" id={`review-li-${idx}`}>
-                              <div className="flex justify-between items-center pb-2 border-b border-gray-200" id={`review-head-${idx}`}>
-                                <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                                  <Users className="w-3.5 h-3.5 text-gray-400" />
+                            <div key={pr.id} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3.5 hover:shadow-xs transition duration-150" id={`review-li-${idx}`}>
+                              <div className="flex justify-between items-center pb-2.5 border-b border-slate-100 animate-fade-in" id={`review-head-${idx}`}>
+                                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 font-display">
+                                  <Users className="w-3.5 h-3.5 text-indigo-500" />
                                   Anonymous Peer Critique #{idx + 1}
                                 </span>
-                                <span className="text-[10px] text-gray-400 font-mono">
+                                <span className="text-[10px] text-slate-450 font-mono font-medium">
                                   {new Date(pr.submittedAt).toLocaleDateString()}
                                 </span>
                               </div>
@@ -586,17 +945,17 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                                 {Object.entries(pr.scores).map(([critId, scoreVal]) => {
                                   const crit = activeAssignment.rubric.find(r => r.id === critId);
                                   return (
-                                    <div key={critId} className="bg-white p-2 border border-gray-200 rounded" id={`review-chip-${critId}`}>
-                                      <span className="text-gray-400 block truncate">{crit?.category || "Category"}</span>
-                                      <strong className="text-slate-900 font-mono">{scoreVal} / {crit?.maxPoints || 30}</strong>
+                                    <div key={critId} className="bg-slate-50 p-2.5 border border-slate-150 rounded-xl" id={`review-chip-${critId}`}>
+                                      <span className="text-slate-450 block truncate font-sans font-medium uppercase text-[9px] tracking-wide">{crit?.category || "Category"}</span>
+                                      <strong className="text-slate-800 font-mono text-[11px]">{scoreVal} / {crit?.maxPoints || 30}</strong>
                                     </div>
                                   );
                                 })}
                               </div>
 
                               <div className="text-xs space-y-2 mt-2 leading-relaxed" id={`review-comments-text-${idx}`}>
-                                <p><strong className="text-emerald-800">What worked well:</strong> &ldquo;{pr.commentStrengths}&rdquo;</p>
-                                <p className="pt-1.5 border-t border-dashed border-gray-200"><strong className="text-amber-800">Constructive advice:</strong> &ldquo;{pr.commentImprovements}&rdquo;</p>
+                                <p><strong className="text-emerald-800 font-display">What worked well:</strong> &ldquo;{pr.commentStrengths}&rdquo;</p>
+                                <p className="pt-2 border-t border-dashed border-slate-200/60"><strong className="text-indigo-850 font-display">Constructive advice:</strong> &ldquo;{pr.commentImprovements}&rdquo;</p>
                               </div>
                             </div>
                           ))}
@@ -612,12 +971,14 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
           {/* Right panel: Live AICoach feedback alignment tool (Visible when not submitted) */}
           <div className="lg:col-span-4" id="arena-coach-col">
             {mySubmission && mySubmission.status === 'submitted' ? (
-              <div className="bg-white border border-gray-150 p-5 rounded-xl shadow-xs text-center space-y-2.5" id="arena-sub-locked">
-                <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto" />
-                <h4 className="text-xs font-bold text-slate-900 uppercase">Interactive Response Is Live</h4>
-                <p className="text-[10.5px] text-gray-500 leading-normal">Your draft response has been finalized and posted anonymously to other students in the Peer Review Center.</p>
-                <div className="p-3 bg-violet-50 text-violet-900 text-[10.5px] leading-relaxed rounded-lg text-left" id="congrats-coach text font-medium">
-                  <strong>Congratulations:</strong> Classmates can now view and review your essay in their Peer Review centers! Swap active profile roles in the top header to examine and review classmates' answers!
+              <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm text-center space-y-3.5 animate-fade-in" id="arena-sub-locked">
+                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mx-auto" id="locked-icon-bubble">
+                  <CheckCircle className="w-5 h-5" />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-sans">Interactive Response Is Live</h4>
+                <p className="text-[11px] text-slate-500 leading-relaxed font-sans">Your draft response has been finalized and posted anonymously to other students in the Peer Review Center.</p>
+                <div className="p-4 bg-indigo-50 border border-indigo-100/50 text-indigo-950 text-xs leading-relaxed rounded-xl text-left animate-fade-in" id="congrats-coach text font-medium">
+                  <strong className="font-bold text-indigo-900 font-display block mb-1">Peer Review Active:</strong> Classmates can now view and review your essay in their Peer Review centers! Swap active profile roles in the top header to examine and review classmates' answers!
                 </div>
               </div>
             ) : (
@@ -636,16 +997,16 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
       {activeTab === 'peer-review' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="peer-review-pane">
           {/* Left Hand: classmates roster submissions listed */}
-          <div className="lg:col-span-4 bg-white border border-gray-150 rounded-xl p-4 shadow-xs flex flex-col gap-3" id="classmates-entries">
-            <div className="pb-2 border-b border-gray-100 flex justify-between items-center" id="classmates-header">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Anonymized Essay Roster</h3>
-              <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-mono font-bold text-gray-700">{classmatesSubmissions.length} Available</span>
+          <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm flex flex-col gap-3.5" id="classmates-entries">
+            <div className="pb-3 border-b border-slate-105 flex justify-between items-center" id="classmates-header">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-sans">Anonymized Essay Roster</h3>
+              <span className="text-[10px] bg-indigo-50 border border-indigo-100/50 px-2.5 py-0.5 rounded-lg font-mono font-bold text-indigo-700">{classmatesSubmissions.length} Available</span>
             </div>
 
             {classmatesSubmissions.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-10 font-medium">Currently no classmates have submitted final answers. Ask other students to submit!</p>
+              <p className="text-xs text-slate-400 text-center py-10 font-bold font-sans">Currently no classmates have submitted final answers. Ask other students to submit!</p>
             ) : (
-              <div className="space-y-2 max-h-[480px] overflow-y-auto" id="classmates-list">
+              <div className="space-y-2.5 max-h-[480px] overflow-y-auto" id="classmates-list">
                 {classmatesSubmissions.map((sub, idx) => {
                   const alreadyReviewed = peerReviews.some(pr => pr.submissionId === sub.id && pr.authorId === currentStudent.id);
                   const isSelected = selectedPeerSubId === sub.id;
@@ -655,20 +1016,20 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                       key={sub.id}
                       id={`btn-target-peer-${sub.id}`}
                       onClick={() => handleSelectPeerToReview(sub)}
-                      className={`w-full text-left p-3.5 rounded-xl border transition flex items-start justify-between gap-2 ${isSelected ? 'border-amber-500 bg-amber-50/50 shadow-xs' : 'border-gray-250 bg-white hover:bg-gray-50'}`}
+                      className={`w-full text-left p-4 rounded-xl border transition-all duration-150 flex items-start justify-between gap-2.5 cursor-pointer ${isSelected ? 'border-indigo-650 bg-indigo-50/40 shadow-xs' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                     >
                       <div className="min-w-0" id={`classmate-btn-info-${sub.id}`}>
                         <div className="flex items-center gap-2" id={`classmate-btn-div-${sub.id}`}>
-                          <h4 className="text-xs font-bold text-slate-900 font-sans">Classmate Response #{idx + 1}</h4>
+                          <h4 className="text-xs font-bold text-slate-800 font-display">Classmate Response #{idx + 1}</h4>
                           {alreadyReviewed && (
-                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 flex items-center gap-0.5">
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 flex items-center gap-0.5 font-sans">
                               <CheckCircle className="w-2.5 h-2.5" /> Reviewed
                             </span>
                           )}
                         </div>
-                        <p className="text-[10.5px] text-gray-500 truncate mt-1">{sub.content}</p>
+                        <p className="text-[10.5px] text-slate-450 truncate mt-1.5 font-sans font-medium">{sub.content}</p>
                       </div>
-                      <ArrowRight className="w-4 h-4 text-gray-300 shrink-0 self-center" />
+                      <ArrowRight className={`w-4 h-4 shrink-0 self-center transition ${isSelected ? 'text-indigo-655 text-indigo-600' : 'text-slate-300'}`} />
                     </button>
                   );
                 })}
@@ -688,53 +1049,120 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                 return (
                   <div className="space-y-6 animate-fade-in" id="peer-critique-form-holder">
                     {/* Peer submission and metadata context */}
-                    <div className="bg-white border border-gray-150 p-6 rounded-xl shadow-xs" id="peer-content-preview">
-                      <div className="border-b border-gray-150 pb-3 mb-4" id="peer-metadata">
-                        <span className="text-[10px] font-mono text-gray-400 block font-bold uppercase tracking-widest">ANONYMOUS CLASSROOM SUBMISSION</span>
-                        <h3 className="text-sm font-bold text-slate-950 font-sans">Classmate Response #{peerIndex}</h3>
+                    <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm" id="peer-content-preview">
+                      <div className="border-b border-slate-100 pb-3 mb-4" id="peer-metadata">
+                        <span className="text-[9px] font-mono text-slate-400 block font-bold uppercase tracking-widest mb-1.5">ANONYMOUS CLASSROOM SUBMISSION</span>
+                        <h3 className="text-sm font-bold text-slate-800 font-display">Classmate Response #{peerIndex}</h3>
                       </div>
                       
                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5" id="peer-original-content">
-                        <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans">{targetSub.content}</p>
+                        <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed font-sans font-medium">{targetSub.content}</p>
                       </div>
                     </div>
 
                     {/* Critique Review Assessment form */}
                     {hasReviewed ? (
-                      <div className="bg-emerald-50/40 border border-emerald-100 p-6 rounded-xl text-center space-y-3" id="peer-already-reviewed">
-                        <ThumbsUp className="w-8 h-8 text-emerald-500 mx-auto" />
-                        <h4 className="text-xs font-bold text-emerald-990 uppercase">Peer Evaluation Accomplished!</h4>
-                        <p className="text-xs text-gray-600 max-w-sm mx-auto leading-relaxed">You have submitted constructive scores and qualitative remarks to Classmate Response #{peerIndex}. Select another classmate response from the sidebar roster list to leave further commentaries.</p>
+                      <div className="bg-emerald-50/40 border border-emerald-100 p-6 rounded-2xl text-center space-y-3 shadow-xs animate-fade-in" id="peer-already-reviewed">
+                        <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto" id="thumbsup-critique">
+                          <ThumbsUp className="w-5 h-5" />
+                        </div>
+                        <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-widest font-sans">Peer Evaluation Accomplished!</h4>
+                        <p className="text-xs text-slate-600 max-w-sm mx-auto leading-relaxed font-medium">You have submitted constructive scores and qualitative remarks to Classmate Response #{peerIndex}. Select another classmate response from the sidebar roster list to leave further commentaries.</p>
                       </div>
                     ) : (
-                      <form onSubmit={handlePostPeerCritique} className="bg-white border border-gray-150 p-6 rounded-xl shadow-sm space-y-6" id="constructive-peer-form">
-                        <div className="border-b border-gray-150 pb-3" id="form-header-row">
-                          <h4 className="text-xs font-bold text-slate-950 uppercase tracking-wider flex items-center gap-1.5 font-sans">
-                            <MessageSquare className="w-4 h-4 text-amber-500" />
+                      <form onSubmit={handlePostPeerCritique} className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-6 animate-fade-in" id="constructive-peer-form">
+                        <div className="border-b border-slate-100 pb-3" id="form-header-row">
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 font-display">
+                            <MessageSquare className="w-4 h-4 text-indigo-650 text-indigo-600" />
                             Constructive Critique Rubric Scoring
                           </h4>
-                          <p className="text-[10.5px] text-gray-500 leading-normal">Submit fair grades out of maximum parameters, accompanied by constructive feedback suggestions.</p>
+                          <p className="text-[11px] text-slate-450 leading-relaxed font-sans mt-1">Submit fair grades out of maximum parameters, accompanied by constructive feedback suggestions.</p>
+                        </div>
+
+                        {/* Active Instructor Guidelines Banner */}
+                        <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-xl flex gap-3 text-left animate-fade-in animate-shake-none" id="active-review-criteria-banner">
+                          <BookOpen className="w-4.5 h-4.5 text-indigo-600 shrink-0 mt-0.5" />
+                          <div>
+                            <h5 className="text-[11px] font-bold text-indigo-950 font-display uppercase tracking-wide">Instructor Feedback Guidelines</h5>
+                            <p className="text-[10.5px] text-slate-600 font-sans leading-relaxed mt-1 whitespace-pre-line italic">
+                              {activeAssignment?.peerReviewGuidelines || "1. Address specific paragraphs or thesis structure.\n2. Do not use inflammatory remarks or general placeholders."}
+                            </p>
+                          </div>
                         </div>
 
                         {peerSuccessMsg && (
-                          <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 text-xs rounded-xl flex items-center gap-1.5" id="review-success">
-                            <CheckCircle className="w-4 h-4" />
-                            <span>Critique feedback successfully posted to class ledger!</span>
+                          <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-850 text-xs rounded-xl flex items-center gap-2" id="review-success">
+                            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="font-sans font-semibold">Critique feedback successfully posted to class ledger!</span>
+                          </div>
+                        )}
+
+                        {/* REAL-TIME SCRUTINY QUALITY ALERT */}
+                        {moderationWarning && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4.5 space-y-3.5 text-left animate-fade-in" id="reviewer-moderation-interactivity-card">
+                            <div className="flex items-center gap-2.5" id="mod-warn-banner">
+                              <AlertTriangle className="w-4.5 h-4.5 text-amber-600 shrink-0" />
+                              <div className="min-w-0">
+                                <h5 className="text-xs font-bold text-amber-900 font-display">Feedback Content Scrutiny Warning</h5>
+                                <p className="text-[10px] text-amber-700 font-sans mt-0.5">Automated guidelines checkers flagged potential improvements for your text.</p>
+                              </div>
+                            </div>
+
+                            <div className="text-xs text-slate-750 font-sans space-y-2.5 leading-relaxed" id="mod-warn-report">
+                              <p>
+                                <strong className="text-amber-950 font-bold block mb-0.5">Flagged Reason:</strong>
+                                {moderationWarning.flagReason}
+                              </p>
+
+                              {moderationWarning.suggestedRevision && (
+                                <div className="bg-white border border-indigo-150 p-3.5 rounded-xl space-y-1.5" id="mod-warn-revision">
+                                  <span className="text-[9px] font-extrabold text-indigo-600 tracking-wider block font-sans uppercase">✨ AI Polished Constructive Rewrite Suggestion</span>
+                                  <p className="font-sans text-[11px] text-slate-700 leading-relaxed italic font-medium">&ldquo;{moderationWarning.suggestedRevision}&rdquo;</p>
+                                  <button
+                                    id="btn-apply-suggestion"
+                                    type="button"
+                                    onClick={() => handleSubmitBypassingModeration(true)}
+                                    className="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-extrabold text-[11px] py-2 rounded-lg transition duration-105 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                                  >
+                                    <Sparkles className="w-3 h-3" /> Apply refined AI rewrite & submit now
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row gap-2.5 pt-1.5" id="mod-warn-action-buttons">
+                              <button
+                                id="btn-mod-edit-draft"
+                                type="button"
+                                onClick={() => setModerationWarning(null)}
+                                className="flex-1 bg-white hover:bg-slate-50 border border-slate-205 text-slate-705 font-bold text-[11px] py-1.8 py-2 rounded-lg transition cursor-pointer text-center"
+                              >
+                                ✏️ Let me revise my commentary manually
+                              </button>
+                              <button
+                                id="btn-mod-bypass"
+                                type="button"
+                                onClick={() => handleSubmitBypassingModeration(false)}
+                                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] py-2 rounded-lg transition cursor-pointer text-center"
+                              >
+                                Submit anyway to Teacher Audit Queue
+                              </button>
+                            </div>
                           </div>
                         )}
 
                         {/* Slide/Number input indicators for each rubric category */}
                         <div className="space-y-4" id="critique-rubrics-scoring-card">
-                          <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest pl-1 Block mb-2">Rubric score sliders</span>
+                          <span className="text-[10px] font-mono font-bold text-slate-450 uppercase tracking-widest pl-1 block mb-1 font-sans">Rubric score sliders</span>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="slug-rubrics-grid">
                             {activeAssignment.rubric.map((r, idx) => (
-                              <div key={r.id} className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3 flex flex-col justify-between" id={`score-slide-${idx}`}>
+                              <div key={r.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 flex flex-col justify-between" id={`score-slide-${idx}`}>
                                 <div>
-                                  <div className="flex justify-between items-center text-xs pb-1 border-b border-gray-150 gap-2 mb-2" id={`score-slide-head-${idx}`}>
-                                    <span className="font-semibold text-slate-900 truncate">{r.category}</span>
-                                    <strong className="font-mono text-slate-800 font-bold shrink-0">{peerScores[r.id] || 0} <span className="text-gray-400">/ {r.maxPoints} pts</span></strong>
+                                  <div className="flex justify-between items-center text-xs pb-1 border-b border-slate-200 gap-2 mb-2" id={`score-slide-head-${idx}`}>
+                                    <span className="font-bold text-slate-800 font-display">{r.category}</span>
+                                    <strong className="font-mono text-indigo-700 font-extrabold shrink-0">{peerScores[r.id] || 0} <span className="text-slate-400">/ {r.maxPoints} pts</span></strong>
                                   </div>
-                                  <p className="text-[10px] text-gray-500 leading-normal">{r.description}</p>
+                                  <p className="text-[10px] text-slate-500 leading-normal font-sans">{r.description}</p>
                                 </div>
 
                                 <div className="flex items-center gap-3 pt-2" id={`score-slide-control-${idx}`}>
@@ -745,7 +1173,7 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                                     max={r.maxPoints}
                                     value={peerScores[r.id] || 0}
                                     onChange={(e) => setPeerScores({ ...peerScores, [r.id]: Number(e.target.value) })}
-                                    className="w-full h-1.5 bg-gray-205 bg-gray-200 accent-amber-500 rounded-lg appearance-none cursor-pointer"
+                                    className="w-full h-1.5 bg-slate-200 accent-indigo-600 rounded-lg appearance-none cursor-pointer"
                                   />
                                 </div>
                               </div>
@@ -754,12 +1182,12 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                         </div>
 
                         {/* Commentary boxes */}
-                        <div className="space-y-4 pt-3 border-t border-gray-150" id="qualitative-commentary-fields">
-                          <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest pl-1 Block">Structured Written Dialogue</span>
+                        <div className="space-y-5 pt-4 border-t border-slate-100" id="qualitative-commentary-fields">
+                          <span className="text-[10px] font-mono font-bold text-slate-450 uppercase tracking-widest pl-1 block font-sans">Structured Written Dialogue</span>
 
-                          <div>
-                            <label htmlFor="input-peer-strengths" className="text-xs font-semibold text-slate-800 block mb-1">What worked exceptionally well in this response?</label>
-                            <span className="text-[10px] text-gray-400 block mb-1.5">Point out logical arguments, framework compliance, style strengths...</span>
+                          <div className="space-y-1.5">
+                            <label htmlFor="input-peer-strengths" className="text-xs font-bold text-slate-800 font-display block">What worked exceptionally well in this response?</label>
+                            <span className="text-[10px] text-slate-450 block font-sans">Point out logical arguments, framework compliance, style strengths...</span>
                             <textarea
                               id="input-peer-strengths"
                               rows={3}
@@ -767,13 +1195,13 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                               value={peerGoodComments}
                               onChange={(e) => setPeerGoodComments(e.target.value)}
                               placeholder="e.g., I loved how smoothly you connected Bentham's mathematics with consumer marketing limitations, particularly in your third paragraph..."
-                              className="bg-gray-50 border border-gray-250 p-3 text-xs font-sans w-full rounded-xl focus:ring-1 focus:ring-amber-500 text-slate-900"
+                              className="bg-slate-50 border border-slate-200 p-3.5 text-xs font-sans w-full rounded-xl focus:ring-2 focus:ring-indigo-650/20 focus:border-indigo-600 text-slate-900 leading-relaxed outline-hidden transition"
                             />
                           </div>
 
-                          <div>
-                            <label htmlFor="input-peer-improvements" className="text-xs font-semibold text-slate-800 block mb-1">What constructive revisions would help them elevate their claims?</label>
-                            <span className="text-[10px] text-gray-400 block mb-1.5">Point out counterclaims they might have overlooked or grammatical transitions...</span>
+                          <div className="space-y-1.5">
+                            <label htmlFor="input-peer-improvements" className="text-xs font-bold text-slate-800 font-display block">What constructive revisions would help them elevate their claims?</label>
+                            <span className="text-[10px] text-slate-450 block font-sans">Point out counterclaims they might have overlooked or grammatical transitions...</span>
                             <textarea
                               id="input-peer-improvements"
                               rows={3}
@@ -781,27 +1209,37 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                               value={peerImproveComments}
                               onChange={(e) => setPeerImproveComments(e.target.value)}
                               placeholder="e.g., To improve further, distinguishing clearly between Kant's universal moral deontology versus transactional contract promises would make your vocabulary much cleaner..."
-                              className="bg-gray-50 border border-gray-250 p-3 text-xs font-sans w-full rounded-xl focus:ring-1 focus:ring-amber-500 text-slate-900"
+                              className="bg-slate-50 border border-slate-200 p-3.5 text-xs font-sans w-full rounded-xl focus:ring-2 focus:ring-indigo-650/20 focus:border-indigo-600 text-slate-900 leading-relaxed outline-hidden transition"
                             />
                           </div>
                         </div>
 
-                        <div className="border-t border-gray-150 pt-4 flex justify-end gap-3" id="constructive-peer-form-submit">
+                        <div className="border-t border-slate-100 pt-5 flex justify-end gap-3.5" id="constructive-peer-form-submit">
                           <button
                             id="btn-cancel-critique"
                             type="button"
                             onClick={() => setSelectedPeerSubId(null)}
-                            className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-xs font-semibold text-slate-700 rounded-lg transition shrink-0 cursor-pointer"
+                            className="px-4.5 py-2.5 border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 rounded-xl transition cursor-pointer"
                           >
                             Cancel
                           </button>
                           <button
                             id="btn-submit-critique"
                             type="submit"
-                            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 transition shrink-0 cursor-pointer"
+                            disabled={isModerating}
+                            className="px-5.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-75 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition cursor-pointer"
                           >
-                            Publish Peer Dialogue Review
-                            <Send className="w-3.5 h-3.5" />
+                            {isModerating ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                Analyzing Feedback Quality...
+                              </>
+                            ) : (
+                              <>
+                                Publish Peer Dialogue Review
+                                <Send className="w-3.5 h-3.5" />
+                              </>
+                            )}
                           </button>
                         </div>
                       </form>
@@ -810,12 +1248,101 @@ The draft demonstrates solid dedication to critical synthesis. We suggest streng
                 );
               })()
             ) : (
-              <div className="bg-gray-50/50 border border-gray-150 border-dashed rounded-xl p-16 text-center text-gray-400" id="peer-workspace-empty">
-                <Users className="w-10 h-10 text-gray-300 mx-auto mb-2.5" />
-                <h4 className="text-sm font-semibold text-gray-500 mb-1">Constructive Dialogue Board</h4>
-                <p className="text-xs text-gray-400 max-w-sm mx-auto px-4">Choose any classmate's anonymized submission response from your left-hand roster index to begin reading, leaving grading scores, and writing structured critique feedback notes.</p>
+              <div className="bg-slate-50/50 border border-slate-200 border-dashed rounded-2xl p-16 text-center text-slate-400" id="peer-workspace-empty">
+                <Users className="w-10 h-10 text-indigo-400/80 mx-auto mb-3.5" />
+                <h4 className="text-sm font-bold text-slate-800 mb-1 font-display uppercase tracking-wider">Constructive Dialogue Board</h4>
+                <p className="text-xs text-slate-450 max-w-sm mx-auto px-4 font-sans font-medium leading-relaxed">Choose any classmate's anonymized submission response from your left-hand roster index to begin reading, leaving grading scores, and writing structured critique feedback notes.</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* JOIN CLASSROOMS PANEL */}
+      {activeTab === 'joined-classrooms' && (
+        <div className="space-y-6 animate-fade-in" id="student-classrooms-panel">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Join Form Card */}
+            <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xs h-fit" id="student-join-class-card">
+              <div className="flex items-center gap-2 pb-4 border-b border-slate-100" id="student-join-header">
+                <Cpu className="w-5 h-5 text-indigo-650 bg-indigo-50 p-1 rounded-md mb-0.5" />
+                <h4 className="text-xs font-bold text-slate-805 uppercase tracking-widest font-sans">Enroll in Academic Class Code</h4>
+              </div>
+
+              <form onSubmit={handleJoinClassroomSubmit} className="space-y-4 mt-4" id="student-join-form">
+                <div>
+                  <label htmlFor="input-join-code" className="text-xs font-bold text-slate-700 block mb-1">Classroom Entry Code</label>
+                  <input
+                    id="input-join-code"
+                    type="text"
+                    required
+                    placeholder="e.g. CS-501, ETHICS-202"
+                    value={joinClassCode}
+                    onChange={(e) => setJoinClassCode(e.target.value)}
+                    className="bg-slate-50 border border-slate-205 p-3 text-xs w-full rounded-xl focus:ring-1 focus:ring-indigo-600 font-mono font-bold uppercase text-slate-900 placeholder:normal-case shadow-xs"
+                  />
+                  <p className="text-[10px] text-slate-450 mt-1.5 font-sans leading-relaxed">Enter the registration coupon code issued by your professor to instantly see dynamic discussion prompts and participate in peer critique review portfolios.</p>
+                </div>
+
+                {joinError && (
+                  <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 text-xs font-sans font-semibold leading-relaxed animate-shake">
+                    {joinError}
+                  </div>
+                )}
+
+                {joinSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-800 text-xs font-sans font-semibold leading-relaxed">
+                    {joinSuccess}
+                  </div>
+                )}
+
+                <button
+                  id="btn-student-enroll-execute"
+                  type="submit"
+                  className="w-full bg-slate-900 hover:bg-black text-white text-xs font-bold py-2.5 rounded-xl mt-4 transition cursor-pointer shadow-xs uppercase tracking-wide font-sans"
+                >
+                  Confirm Class Enrollment
+                </button>
+              </form>
+            </div>
+
+            {/* My Joined Classes List */}
+            <div className="space-y-4" id="enrolled-classes-listings">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">My Registered Classrooms ({myClassroomCodes.length})</h4>
+              
+              <div className="grid grid-cols-1 gap-4" id="enrolled-classes-grid">
+                {classrooms.filter(c => myClassroomCodes.includes(c.code.toUpperCase())).map(c => {
+                  const classroomAssignments = assignments.filter(a => a.classroomCode === c.code);
+                  return (
+                    <div key={c.id} className="bg-white border border-slate-200 p-5 rounded-2xl flex flex-col justify-between hover:border-indigo-200 transition shadow-xs" id={`registered-class-${c.code}`}>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="bg-indigo-50 border border-indigo-100 text-indigo-750 font-mono font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase">
+                            {c.code}
+                          </span>
+                          <h5 className="text-sm font-extrabold text-slate-900 mt-2 font-display">{c.name}</h5>
+                        </div>
+                        <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-100">
+                          <CheckCircle className="w-3.5 h-3.5" /> Enrolled
+                        </span>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center text-[10.5px] text-slate-450 font-sans font-semibold">
+                        <span>Active Topics: <strong className="text-slate-700">{classroomAssignments.length}</strong></span>
+                        <span>Instructor: Faculty Lead</span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {myClassroomCodes.length === 0 && (
+                  <div className="text-center p-12 bg-slate-50 border border-slate-200 border-dashed rounded-2xl text-slate-400 font-sans font-medium flex flex-col items-center justify-center space-y-2">
+                    <BookOpen className="w-8 h-8 text-slate-350" />
+                    <span>No active classroom enrollments detected. Key in your class code above to register.</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

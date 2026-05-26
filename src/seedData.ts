@@ -6,28 +6,46 @@ export const SEED_PROFILES: UserProfile[] = [
     name: "Dr. Elizabeth Vance",
     role: "teacher",
     avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=150",
-    email: "e.vance@education.edu"
+    email: "e.vance@education.edu",
+    staffId: "VANCE77"
   },
   {
     id: "alex_morgan",
     name: "Alex Morgan",
     role: "student",
     avatarUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=150",
-    email: "alex.m@student.edu"
+    email: "alex.m@student.edu",
+    studentId: "STU101",
+    classroomCode: "AI-ETHICS"
   },
   {
     id: "sophia_chen",
     name: "Sophia Chen",
     role: "student",
     avatarUrl: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=150",
-    email: "sophia.c@student.edu"
+    email: "sophia.c@student.edu",
+    studentId: "STU102",
+    classroomCode: "AI-ETHICS"
   },
   {
     id: "mateo_rodriguez",
     name: "Mateo Rodriguez",
     role: "student",
     avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=150",
-    email: "mateo.r@student.edu"
+    email: "mateo.r@student.edu",
+    studentId: "STU103",
+    classroomCode: "AI-ETHICS"
+  }
+];
+
+export const SEED_CLASSROOMS = [
+  {
+    id: "class_ethics_101",
+    name: "Autonomous Systems Ethics (AI-101)",
+    code: "AI-ETHICS",
+    teacherId: "vance_teacher",
+    allowedDocTypes: ["PDF", "PPTX", "MP4", "DOCX"],
+    createdAt: "2026-05-19T08:00:00Z"
   }
 ];
 
@@ -37,6 +55,19 @@ export const SEED_ASSIGNMENTS: Assignment[] = [
     title: "Ethical Dilemmas in Autonomous AI Systems",
     description: "Autonomous algorithms (such as self-driving cars or clinical diagnostic systems) often face high-stakes decisional matrices. If a split-second collision is unavoidable, should a self-driving vehicle's algorithm prioritize passenger safety above all else, or execute actions that minimize overall human casualties (utilitarian approach)? Discuss this scenario by applying both Utilitarian and Deontological (duty-based) ethical frameworks. Cite real-world or theoretical counterexamples, such as the Trolley Problem, to enrich your argumentation.",
     createdAt: "2026-05-20T09:00:00Z",
+    learningObjectives: "Apply ethical theories (utilitarianism, deontology) to complex autonomous decision-making scenarios. Synthesize opposing views and formulate a balanced public safety recommendation.",
+    peerReviewGuidelines: "1. Respectful constructive tone.\n2. Pinpoint exactly one logical strength in their deontology application.\n3. Critique whether there is sufficient evidence regarding Bentham's casualty minimization.\n4. Avoid one-word answers like 'agreed' or comments lacking reasoning.",
+    type: "essay",
+    minReviews: 3,
+    classroomCode: "AI-ETHICS",
+    allowedDocTypes: ["PDF", "DOCX"],
+    emphasisPriorities: {
+      grammar: "medium",
+      structure: "high",
+      contentAccuracy: "high",
+      criticalAnalysis: "high",
+      creativity: "medium"
+    },
     rubric: [
       {
         id: "philosophy_grounding",
@@ -69,6 +100,19 @@ export const SEED_ASSIGNMENTS: Assignment[] = [
     title: "Climate Adaptation vs. Mitigation in Developing Nations",
     description: "As globally rising ocean levels and changing weather patterns continue to accelerate environmental strain, policy developers are in deep discussion about allocation. Critically evaluate whether regional governments of developing nations should devote the majority of their primary climate budget to Mitigation (investing in renewable transitions, carbon traps, zero-emission transits) or Adaptation (building seawalls, reinforcing drainage grids, introducing drought-impervious agriculture). Consider funding limits, economic compromises, and international climate justice in your response.",
     createdAt: "2026-05-22T10:30:00Z",
+    learningObjectives: "Evaluate policy adaptation budgets against mitigating infrastructure initiatives. Analyze international climate justice trends and resource bounds.",
+    peerReviewGuidelines: "1. Focus on economic and policy realism. Evaluate whether classmate's financing claims are viable.\n2. Suggest at least one specific adaptation metric (e.g. seawalls, crop types) to expand their argument.\n3. Maintain an encouraging and academically helpful prose style.",
+    type: "essay",
+    minReviews: 3,
+    classroomCode: "AI-ETHICS",
+    allowedDocTypes: ["PDF"],
+    emphasisPriorities: {
+      grammar: "medium",
+      structure: "medium",
+      contentAccuracy: "high",
+      criticalAnalysis: "high",
+      creativity: "low"
+    },
     rubric: [
       {
         id: "economic_realism",
@@ -263,12 +307,37 @@ export const SEED_PEER_REVIEWS: PeerReview[] = [
     commentStrengths: "Mateo, your argument about public adoption is very strong. Philosophers often forget that if people don't buy self-driving cars, standard human-driven cars (which crash far more often) will remain on roads and kill thousands more.",
     commentImprovements: "I would suggest strengthening your deontology section. Kant argues that human lives have 'dignity' beyond any 'price' or transaction, so treating bystander lives as an acceptable commercial exchange violates this. Separating business contract ethics from deontology would elevate the vocabulary.",
     submittedAt: "2026-05-25T13:40:00Z"
+  },
+  {
+    id: "pr_flagged_sample",
+    submissionId: "sub_mateo_ethics",
+    assignmentId: "asg_1_ai_ethics",
+    authorId: "alex_morgan",
+    authorName: "Alex Morgan",
+    scores: {
+      "philosophy_grounding": 10,
+      "logical_cohesion": 8,
+      "grammar_style": 12,
+      "peer_review_value": 5
+    },
+    scoreGiven: 35,
+    commentStrengths: "this sucks",
+    commentImprovements: "it has terrible mock facts and is stupid",
+    submittedAt: "2026-05-25T19:10:00Z",
+    isFlagged: true,
+    flagReason: "Inappropriate or low-effort phrase matching ('this sucks', 'stupid'). Class reviews must adhere strictly to constructive guidelines.",
+    suggestedRevision: "I appreciated your practical considerations on consumer adoption. However, expanding code details and clarifying deontology rules would make the thesis substantially stronger.",
+    flagCheckedByTeacher: false,
+    qualityRating: "needs_improvement"
   }
 ];
 
 export function initializeDatabase() {
   if (!localStorage.getItem("pforum_profiles")) {
     localStorage.setItem("pforum_profiles", JSON.stringify(SEED_PROFILES));
+  }
+  if (!localStorage.getItem("pforum_classrooms")) {
+    localStorage.setItem("pforum_classrooms", JSON.stringify(SEED_CLASSROOMS));
   }
   if (!localStorage.getItem("pforum_assignments")) {
     localStorage.setItem("pforum_assignments", JSON.stringify(SEED_ASSIGNMENTS));
@@ -280,8 +349,6 @@ export function initializeDatabase() {
     localStorage.setItem("pforum_peer_reviews", JSON.stringify(SEED_PEER_REVIEWS));
   }
   if (!localStorage.getItem("pforum_current_user")) {
-    // Default current user to Mateo so they can interact as a student on first load,
-    // or Sophia, or Alex who is drafting, or Vance who is the teacher.
-    localStorage.setItem("pforum_current_user", JSON.stringify(SEED_PROFILES[1])); // Alex Morgan as default
+    localStorage.setItem("pforum_current_user", "null"); // Default to logged out for auth form
   }
 }
