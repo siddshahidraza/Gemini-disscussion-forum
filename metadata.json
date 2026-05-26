@@ -1,0 +1,6 @@
+{
+  "name": "Discussion Forum with AI Feedback & Peer Review",
+  "description": "A collaborative teacher-student discussion forum where teachers assign prompts, students reply, peers review constructively, and AI provides instant grading, feedback, and analytical reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
